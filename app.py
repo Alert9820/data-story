@@ -7,17 +7,18 @@ import plotly.graph_objects as go
 from flask import Flask, render_template, request, jsonify, send_file
 from werkzeug.utils import secure_filename
 import google.generativeai as genai
-from datetime import datetime
 import json
 import warnings
+import io
 warnings.filterwarnings('ignore')
 
-app = Flask(__name__)
+# IMPORTANT: Specify template folder explicitly
+app = Flask(__name__, template_folder='templates')
 
 # Configuration
-app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB
-app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['CLEANED_FOLDER'] = 'cleaned'
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
+app.config['UPLOAD_FOLDER'] = '/tmp/uploads'
+app.config['CLEANED_FOLDER'] = '/tmp/cleaned'
 
 # Create folders
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -352,7 +353,7 @@ def upload():
 
 @app.route('/download/cleaned')
 def download_cleaned():
-    if 'CURRENT_CLEANED' in app.config:
+    if 'CURRENT_CLEANED' in app.config and os.path.exists(app.config['CURRENT_CLEANED']):
         return send_file(app.config['CURRENT_CLEANED'], as_attachment=True, download_name='cleaned_data.csv')
     return jsonify({'error': 'No cleaned data available'}), 400
 
@@ -369,6 +370,5 @@ def download_insights():
     return jsonify({'error': 'No insights available'}), 400
 
 if __name__ == '__main__':
-    import io
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
