@@ -10,9 +10,9 @@ import google.generativeai as genai
 import json
 import warnings
 import io
+from decimal import Decimal
 warnings.filterwarnings('ignore')
 
-# IMPORTANT: Specify template folder explicitly
 app = Flask(__name__, template_folder='templates')
 
 # Configuration
@@ -31,6 +31,26 @@ if GEMINI_API_KEY:
     model = genai.GenerativeModel('gemini-pro')
 
 ALLOWED_EXTENSIONS = {'csv', 'xlsx', 'xls'}
+
+def convert_to_serializable(obj):
+    """Convert numpy types to Python native types for JSON serialization"""
+    if isinstance(obj, (np.int64, np.int32, np.int16, np.int8)):
+        return int(obj)
+    elif isinstance(obj, (np.float64, np.float32, np.float16)):
+        return float(obj)
+    elif isinstance(obj, np.bool_):
+        return bool(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, pd.Timestamp):
+        return str(obj)
+    elif isinstance(obj, Decimal):
+        return float(obj)
+    elif isinstance(obj, dict):
+        return {key: convert_to_serializable(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_to_serializable(item) for item in obj]
+    return obj
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -78,12 +98,12 @@ def clean_data(df):
     df = df.dropna(axis=1, how='all')
     
     cleaning_report = {
-        'original_rows': original_shape[0],
-        'original_cols': original_shape[1],
-        'cleaned_rows': len(df),
-        'cleaned_cols': len(df.columns),
-        'rows_removed': original_shape[0] - len(df),
-        'cols_removed': original_shape[1] - len(df.columns)
+        'original_rows': int(original_shape[0]),
+        'original_cols': int(original_shape[1]),
+        'cleaned_rows': int(len(df)),
+        'cleaned_cols': int(len(df.columns)),
+        'rows_removed': int(original_shape[0] - len(df)),
+        'cols_removed': int(original_shape[1] - len(df.columns))
     }
     
     return df, cleaning_report
@@ -91,18 +111,18 @@ def clean_data(df):
 def generate_eda(df):
     """Generate EDA report"""
     eda = {
-        'total_rows': len(df),
-        'total_cols': len(df.columns),
-        'numeric_cols': len(df.select_dtypes(include=[np.number]).columns),
-        'categorical_cols': len(df.select_dtypes(include=['object']).columns),
-        'date_cols': len(df.select_dtypes(include=['datetime64']).columns),
-        'total_missing': df.isnull().sum().sum()
+        'total_rows': int(len(df)),
+        'total_cols': int(len(df.columns)),
+        'numeric_cols': int(len(df.select_dtypes(include=[np.number]).columns)),
+        'categorical_cols': int(len(df.select_dtypes(include=['object']).columns)),
+        'date_cols': int(len(df.select_dtypes(include=['datetime64']).columns)),
+        'total_missing': int(df.isnull().sum().sum())
     }
     
     # Missing values by column
     missing_data = df.isnull().sum()
     missing_data = missing_data[missing_data > 0]
-    eda['missing_by_column'] = missing_data.to_dict()
+    eda['missing_by_column'] = convert_to_serializable(missing_data.to_dict())
     
     # Numeric statistics
     numeric_df = df.select_dtypes(include=[np.number])
@@ -110,10 +130,10 @@ def generate_eda(df):
         stats = {}
         for col in numeric_df.columns:
             stats[col] = {
-                'mean': round(numeric_df[col].mean(), 2),
-                'std': round(numeric_df[col].std(), 2),
-                'min': round(numeric_df[col].min(), 2),
-                'max': round(numeric_df[col].max(), 2)
+                'mean': float(round(numeric_df[col].mean(), 2)),
+                'std': float(round(numeric_df[col].std(), 2)),
+                'min': float(round(numeric_df[col].min(), 2)),
+                'max': float(round(numeric_df[col].max(), 2))
             }
         eda['numeric_stats'] = stats
         
@@ -125,9 +145,9 @@ def generate_eda(df):
                 corr_value = corr_matrix.iloc[i, j]
                 if abs(corr_value) > 0.5:
                     correlations.append({
-                        'col1': corr_matrix.columns[i],
-                        'col2': corr_matrix.columns[j],
-                        'value': round(corr_value, 2)
+                        'col1': str(corr_matrix.columns[i]),
+                        'col2': str(corr_matrix.columns[j]),
+                        'value': float(round(corr_value, 2))
                     })
         eda['top_correlations'] = correlations[:5]
     
@@ -215,13 +235,12 @@ def generate_charts(df):
         fig.update_layout(height=400)
         charts['pie_chart'] = json.loads(plotly.io.to_json(fig))
     
-    # Scatter plot
+    # Scatter plot (removed trendline to avoid statsmodels)
     if len(numeric_df.columns) >= 2:
         fig = px.scatter(
             df, x=numeric_df.columns[0], y=numeric_df.columns[1],
             title=f'{numeric_df.columns[0]} vs {numeric_df.columns[1]}',
             template='plotly_dark',
-            trendline="ols",
             color_discrete_sequence=['#ffe66d']
         )
         fig.update_layout(height=400)
@@ -322,21 +341,25 @@ def upload():
         # KPI metrics
         numeric_df = cleaned_df.select_dtypes(include=[np.number])
         kpis = {
-            'total_rows': len(cleaned_df),
-            'total_cols': len(cleaned_df.columns),
-            'completeness': round((1 - cleaned_df.isnull().sum().sum() / (len(cleaned_df) * len(cleaned_df.columns))) * 100, 2),
-            'numeric_columns': len(numeric_df.columns)
+            'total_rows': int(len(cleaned_df)),
+            'total_cols': int(len(cleaned_df.columns)),
+            'completeness': float(round((1 - cleaned_df.isnull().sum().sum() / (len(cleaned_df) * len(cleaned_df.columns))) * 100, 2)),
+            'numeric_columns': int(len(numeric_df.columns))
         }
         
         if not numeric_df.empty:
-            kpis['avg_value'] = round(numeric_df[numeric_df.columns[0]].mean(), 2)
-            kpis['max_value'] = round(numeric_df[numeric_df.columns[0]].max(), 2)
+            kpis['avg_value'] = float(round(numeric_df[numeric_df.columns[0]].mean(), 2))
+            kpis['max_value'] = float(round(numeric_df[numeric_df.columns[0]].max(), 2))
+        
+        # Convert preview data to serializable format
+        preview_data = cleaned_df.head(20).to_dict('records')
+        preview_data = convert_to_serializable(preview_data)
         
         # Store for download
         app.config['CURRENT_CLEANED'] = cleaned_path
         app.config['CURRENT_INSIGHTS'] = insights
         
-        return jsonify({
+        response_data = {
             'success': True,
             'filename': filename,
             'cleaning_report': cleaning_report,
@@ -344,9 +367,11 @@ def upload():
             'charts': charts,
             'insights': insights,
             'kpis': kpis,
-            'preview': cleaned_df.head(20).to_dict('records'),
-            'columns': cleaned_df.columns.tolist()
-        })
+            'preview': preview_data,
+            'columns': [str(col) for col in cleaned_df.columns.tolist()]
+        }
+        
+        return jsonify(convert_to_serializable(response_data))
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500
